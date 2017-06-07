@@ -2,13 +2,16 @@ package cmd
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"log"
 	"net"
 	"os"
+	"strings"
 
 	"github.com/dolfelt/copyql/data"
+	"github.com/fatih/color"
 	"github.com/jmoiron/sqlx"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -25,11 +28,14 @@ func init() {
 	RootCmd.PersistentFlags().String("out", "", "json file to write the data from the source into")
 	viper.BindPFlag("FileOut", RootCmd.PersistentFlags().Lookup("out"))
 
+	RootCmd.PersistentFlags().BoolP("verbose", "v", false, "print debugging information")
+	viper.BindPFlag("Verbose", RootCmd.PersistentFlags().Lookup("verbose"))
+
 }
 
 // RootCmd controls the entry into the application
 var RootCmd = &cobra.Command{
-	Use:   "copyql [table.column:value]",
+	Use:   "copyql <table>.<column>:<value>",
 	Short: "Copy data and relationships from one SQL store to another",
 	Run:   rootRun,
 }
@@ -37,13 +43,25 @@ var RootCmd = &cobra.Command{
 func rootRun(cmd *cobra.Command, args []string) {
 	config, err := data.LoadConfig(configFile)
 	if err != nil {
-		log.Fatal(err)
+		color.Red(err.Error())
+		os.Exit(1)
 	}
 
-	fmt.Println(config)
 	var pkg data.TableData
 
 	if len(config.FileIn) == 0 {
+		if len(args) != 1 {
+			color.Red("Please include an entry point.")
+			os.Exit(1)
+		}
+
+		entryColumn, err := getEntryColumn(args[0])
+		if err != nil {
+			color.Red(err.Error())
+			os.Exit(1)
+		}
+
+		fmt.Println("Beginning to read data...")
 		dbSource := connect(config.Source)
 		defer dbSource.Close()
 
@@ -51,18 +69,25 @@ func rootRun(cmd *cobra.Command, args []string) {
 			DB: dbSource,
 		}
 
-		relations, err := copy.BuildRelations()
+		columns, relations, err := copy.AnalyzeDatabase()
 		if err != nil {
-			log.Fatal(err)
+			color.Red("Error generating automatic relations. %s", err)
+			os.Exit(1)
 		}
 
-		pkg := copy.GetData(data.Pointer{
-			Table:  "accounts",
-			Column: "id",
-		}, 10000, *relations)
+		relations, err = copy.ParseCustomRelations(config.Relations, columns, relations)
+		if err != nil {
+			color.Red("Error use custom relations. %s", err)
+			os.Exit(1)
+		}
 
-		// jsonString, _ := json.MarshalIndent(relations, "", "  ")
-		// fmt.Println(string(jsonString))
+		pkg := copy.GetData(*entryColumn, *columns, *relations)
+
+		if len(pkg) == 0 {
+			color.Yellow("No data found")
+			os.Exit(1)
+		}
+
 		tmpFile := config.FileOut
 		if len(tmpFile) == 0 {
 			tmpFile = "output.json"
@@ -74,9 +99,11 @@ func rootRun(cmd *cobra.Command, args []string) {
 		}
 
 		if len(config.FileOut) > 0 {
+			fmt.Printf("Writing data to %s", config.FileOut)
 			os.Exit(0)
 		}
 	} else {
+		fmt.Printf("Reading data from file: %s\n", config.FileIn)
 		// Read the existing JSON file
 		file, err := ioutil.ReadFile(config.FileIn)
 		if err != nil {
@@ -97,7 +124,30 @@ func rootRun(cmd *cobra.Command, args []string) {
 	}
 
 	errs := place.PutData(pkg)
-	fmt.Println(errs)
+
+	if len(errs) > 0 {
+		fmt.Println(errs)
+		color.Yellow("Completed with errors!")
+	} else {
+		color.Green("OK")
+	}
+}
+
+func getEntryColumn(entry string) (*data.ColumnValue, error) {
+	formatError := "Please include a valid entry point: <table>.<column>:<value>"
+	entryParts := strings.SplitN(entry, ":", 2)
+	if len(entryParts) != 2 {
+		return nil, errors.New(formatError)
+	}
+	entryColumn, err := data.ColumnFromString(entryParts[0])
+	if err != nil {
+		return nil, errors.New(formatError)
+	}
+
+	return &data.ColumnValue{
+		Column: entryColumn,
+		Value:  entryParts[1],
+	}, nil
 }
 
 func connect(config data.SQLConnection) *sqlx.DB {
@@ -106,7 +156,7 @@ func connect(config data.SQLConnection) *sqlx.DB {
 	db, err := sqlx.Open("mysql", sourceDSN)
 	if err != nil {
 		fmt.Println(err)
-		log.Fatal(err)
+		os.Exit(1)
 	}
 
 	return db

@@ -15,28 +15,29 @@ type TableData map[string][]tableRow
 
 // CopyQL manages the data needed for copying
 type CopyQL struct {
-	DB *sqlx.DB
+	DB      *sqlx.DB
+	Verbose bool
 	// relations Relations
 }
 
-// PointerValue hold the value to update in a column
-type PointerValue struct {
-	Pointer
+// ColumnValue hold the value to update in a column
+type ColumnValue struct {
+	Column
 	Value interface{}
 }
 
 // GetData gathers all data relating to an entry point
-func (c *CopyQL) GetData(entry Pointer, id interface{}, relations Relations) TableData {
+func (c *CopyQL) GetData(entry ColumnValue, columns Columns, relations Relations) TableData {
 	copy := &copyData{
 		CopyQL:    c,
+		columns:   columns,
 		relations: relations,
 		completed: map[string]bool{},
-		channel:   make(chan PointerValue),
 		data:      TableData{},
 	}
 
-	copy.cachedPlan = copy.plan(entry)
-	return copy.traverse(entry, id, true)
+	copy.cachedPlan = copy.plan(entry.Column)
+	return copy.traverse(entry, true)
 }
 
 // PutData loads data from JSON into a sql
@@ -57,27 +58,27 @@ func (c *CopyQL) PutData(data TableData) []error {
 type copyData struct {
 	*CopyQL
 	relations  Relations
+	columns    Columns
 	cachedPlan map[string]string
 	completed  map[string]bool
-	channel    chan PointerValue
 	data       TableData
 }
 
-func (c *copyData) plan(entry Pointer) map[string]string {
+func (c *copyData) plan(entry Column) map[string]string {
 	plan := map[string]string{}
 	if sub, ok := c.relations[entry.Table]; ok {
 		for _, rel := range sub {
 			if rel.ForeignKey != "id" {
 				continue
 			}
-			plan[rel.Table] = rel.Column
+			plan[rel.Table] = rel.Name
 		}
 
 		for _, rel := range sub {
 			if rel.ForeignKey != "id" {
 				continue
 			}
-			subPlan := c.plan(rel.Pointer)
+			subPlan := c.plan(rel.Column)
 			for t, c := range subPlan {
 				if _, ok := plan[t]; ok {
 					continue
@@ -92,26 +93,34 @@ func (c *copyData) plan(entry Pointer) map[string]string {
 
 // Traverse gathers all data relating to an entry point. It recursively traverses all relationships
 // to gather all the data.
-func (c *copyData) traverse(entry Pointer, value interface{}, deep bool) TableData {
+func (c *copyData) traverse(entry ColumnValue, deep bool) TableData {
 	data := TableData{}
-	valueKey := fmt.Sprintf("%s:%s", entry.String(), value)
+	valueKey := fmt.Sprintf("%s:%s", entry.String(), entry.Value)
 
 	// Skip because this relation has already been queried
 	if done, ok := c.completed[entry.String()]; ok && done {
-		fmt.Printf("Skipping %s\n", entry.String())
+		if c.Verbose {
+			fmt.Printf("Skipping %s\n", entry.String())
+		}
 		return data
 	}
 	if done, ok := c.completed[valueKey]; ok && done {
-		fmt.Printf("Skipping %s for value %s\n", entry.String(), value)
+		if c.Verbose {
+			fmt.Printf("Skipping %s for value %s\n", entry.String(), entry.Value)
+		}
 		return data
 	}
-	if primary, ok := c.cachedPlan[entry.Table]; ok && primary != entry.Column {
-		fmt.Printf("Skipping because %s is not primary: %s\n", entry.String(), primary)
+	if primary, ok := c.cachedPlan[entry.Table]; ok && primary != entry.Name {
+		if c.Verbose {
+			fmt.Printf("Skipping because %s is not primary: %s\n", entry.String(), primary)
+		}
 		return data
 	}
 
-	rows, err := c.getTableData(entry.Table, entry.Column, value)
-	data[entry.Table] = rows
+	rows, err := c.getTableData(entry.Table, entry.Name, entry.Value)
+	if len(rows) > 0 {
+		data[entry.Table] = rows
+	}
 	if deep {
 		c.completed[entry.String()] = true
 	}
@@ -133,7 +142,7 @@ func (c *copyData) traverse(entry Pointer, value interface{}, deep bool) TableDa
 					continue
 				}
 				// Continue traversing. Deeply only if the ForeignKey is id
-				tr := c.traverse(rel.Pointer, id, rel.ForeignKey == "id")
+				tr := c.traverse(ColumnValue{rel.Column, id}, rel.ForeignKey == "id")
 				for t, r := range tr {
 					data[t] = append(data[t], r...)
 				}
@@ -145,7 +154,9 @@ func (c *copyData) traverse(entry Pointer, value interface{}, deep bool) TableDa
 }
 
 func (c *copyData) getTableData(table string, column string, id interface{}) ([]tableRow, error) {
-	fmt.Printf("Selecting %s.%s from %d\n", table, column, id)
+	if c.Verbose {
+		fmt.Printf("Selecting %s.%s from %d\n", table, column, id)
+	}
 	var res []tableRow
 	rows, err := c.DB.Queryx(fmt.Sprintf("SELECT * FROM %s WHERE %s=?", table, column), id)
 	if err != nil {
@@ -153,23 +164,23 @@ func (c *copyData) getTableData(table string, column string, id interface{}) ([]
 	}
 	defer rows.Close()
 
-	rels := relationMap(c.relations[table])
+	cols := columnMap(c.columns[table])
 
 	for rows.Next() {
 		row := tableRow{}
 		rows.MapScan(row)
-		convertStrings(row, rels)
+		convertStrings(row, cols)
 		res = append(res, row)
 	}
 
 	return res, nil
 }
 
-func relationMap(relations []Relation) map[string]Relation {
-	out := map[string]Relation{}
+func columnMap(columns []Column) map[string]Column {
+	out := map[string]Column{}
 
-	for _, rel := range relations {
-		out[rel.Column] = rel
+	for _, col := range columns {
+		out[col.Name] = col
 	}
 
 	return out
@@ -190,9 +201,6 @@ func (c *CopyQL) putTableData(table string, rows []tableRow) error {
 		for c, v := range row {
 			cols = append(cols, c)
 			binds = append(binds, "?")
-			// if v == nil {
-			// 	v = ""
-			// }
 			vals = append(vals, v)
 		}
 		stmt := fmt.Sprintf(temp, table, strings.Join(cols, "`,`"), strings.Join(binds, ","))
@@ -208,7 +216,7 @@ func (c *CopyQL) putTableData(table string, rows []tableRow) error {
 	return nil
 }
 
-func convertStrings(in map[string]interface{}, relations map[string]Relation) {
+func convertStrings(in map[string]interface{}, columns map[string]Column) {
 	for k, v := range in {
 		t := reflect.TypeOf(v)
 		if t != nil {
@@ -220,8 +228,8 @@ func convertStrings(in map[string]interface{}, relations map[string]Relation) {
 				// do nothing
 			}
 		} else {
-			if rel, ok := relations[k]; ok {
-				if !rel.Nullable {
+			if col, ok := columns[k]; ok {
+				if !col.Nullable {
 					in[k] = ""
 				}
 			}

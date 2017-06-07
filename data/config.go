@@ -19,8 +19,10 @@ type SQLConnection struct {
 type Configuration struct {
 	Source      SQLConnection
 	Destination SQLConnection
+	Relations   map[string]string
 	FileIn      string
 	FileOut     string
+	Verbose     bool
 }
 
 // LoadConfig loads the configuration for copying data

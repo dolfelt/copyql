@@ -14,6 +14,7 @@ In order to use CopyQL, you must have a YAML configuration in your working direc
   * `user` - the connecting user (defaults to `root`)
   * `password` - the password for the user
   * `database` - the database to use when connecting (required)
+* `relations` - defines custom relationships. This is a list of key-value pairs that map columns. For example, `books.old_library_id: libraries.id`
 
 ### Command
 
@@ -54,6 +55,6 @@ We welcome pull requests and suggestions! 👍
 
 ## Todo
 
-* [ ] Add manual relationship configuration
+* [x] Add manual relationship configuration
 * [ ] Improve data inserting to avoid column not found and duplicate key errors
 * [ ] Add ability to set automatic relationship patterns
