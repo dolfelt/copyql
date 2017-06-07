@@ -22,6 +22,8 @@ var configFile string
 func init() {
 	RootCmd.PersistentFlags().StringVarP(&configFile, "config", "c", "", "config file (default is ./copyql.yaml)")
 
+	RootCmd.PersistentFlags().StringSlice("skip", []string{}, "a comma separated list of tables to skip copying")
+
 	RootCmd.PersistentFlags().String("in", "", "json file to read into the destination data store")
 	viper.BindPFlag("FileIn", RootCmd.PersistentFlags().Lookup("in"))
 
@@ -42,6 +44,7 @@ var RootCmd = &cobra.Command{
 
 func rootRun(cmd *cobra.Command, args []string) {
 	config, err := data.LoadConfig(configFile)
+	config.SkipTables, _ = cmd.PersistentFlags().GetStringSlice("skip")
 	if err != nil {
 		color.Red(err.Error())
 		os.Exit(1)
@@ -61,12 +64,19 @@ func rootRun(cmd *cobra.Command, args []string) {
 			os.Exit(1)
 		}
 
-		fmt.Println("Beginning to read data...")
 		dbSource := connect(config.Source)
 		defer dbSource.Close()
 
+		if len(config.SkipTables) > 0 {
+			fmt.Printf("Skipping tables %s\n", strings.Join(config.SkipTables, ", "))
+		}
+
+		fmt.Println("Copying data...")
+
 		copy := data.CopyQL{
-			DB: dbSource,
+			DB:         dbSource,
+			SkipTables: config.SkipTables,
+			Verbose:    config.Verbose,
 		}
 
 		columns, relations, err := copy.AnalyzeDatabase()
@@ -81,7 +91,7 @@ func rootRun(cmd *cobra.Command, args []string) {
 			os.Exit(1)
 		}
 
-		pkg := copy.GetData(*entryColumn, *columns, *relations)
+		pkg = copy.GetData(*entryColumn, *columns, *relations)
 
 		if len(pkg) == 0 {
 			color.Yellow("No data found")
@@ -99,7 +109,7 @@ func rootRun(cmd *cobra.Command, args []string) {
 		}
 
 		if len(config.FileOut) > 0 {
-			fmt.Printf("Writing data to %s", config.FileOut)
+			fmt.Printf("Writing data to %s\n", config.FileOut)
 			os.Exit(0)
 		}
 	} else {
@@ -120,7 +130,8 @@ func rootRun(cmd *cobra.Command, args []string) {
 	// Put the data back into a different db
 	dbDest := connect(config.Destination)
 	place := data.CopyQL{
-		DB: dbDest,
+		DB:      dbDest,
+		Verbose: config.Verbose,
 	}
 
 	errs := place.PutData(pkg)

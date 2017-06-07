@@ -20,6 +20,7 @@ type Configuration struct {
 	Source      SQLConnection
 	Destination SQLConnection
 	Relations   map[string]string
+	SkipTables  []string
 	FileIn      string
 	FileOut     string
 	Verbose     bool
@@ -52,13 +53,7 @@ func LoadConfig(configFile string) (*Configuration, error) {
 	return &config, nil
 }
 
-// TODO: Parse relations
-func parseRelations() {
-
-}
-
 func setConfigDefaults() {
-
 	for _, db := range []string{"Source", "Destination"} {
 		viper.SetDefault(db+".Port", 3306)
 		viper.SetDefault(db+".Host", "localhost")

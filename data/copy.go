@@ -15,9 +15,19 @@ type TableData map[string][]tableRow
 
 // CopyQL manages the data needed for copying
 type CopyQL struct {
-	DB      *sqlx.DB
-	Verbose bool
+	DB         *sqlx.DB
+	SkipTables []string
+	Verbose    bool
 	// relations Relations
+}
+
+type copyData struct {
+	*CopyQL
+	relations  Relations
+	columns    Columns
+	cachedPlan map[string]string
+	completed  map[string]bool
+	data       TableData
 }
 
 // ColumnValue hold the value to update in a column
@@ -55,15 +65,6 @@ func (c *CopyQL) PutData(data TableData) []error {
 	return errs
 }
 
-type copyData struct {
-	*CopyQL
-	relations  Relations
-	columns    Columns
-	cachedPlan map[string]string
-	completed  map[string]bool
-	data       TableData
-}
-
 func (c *copyData) plan(entry Column) map[string]string {
 	plan := map[string]string{}
 	if sub, ok := c.relations[entry.Table]; ok {
@@ -96,6 +97,15 @@ func (c *copyData) plan(entry Column) map[string]string {
 func (c *copyData) traverse(entry ColumnValue, deep bool) TableData {
 	data := TableData{}
 	valueKey := fmt.Sprintf("%s:%s", entry.String(), entry.Value)
+
+	for _, skip := range c.SkipTables {
+		if skip == entry.Table {
+			if c.Verbose {
+				fmt.Printf("Skipping table %s\n", entry.Table)
+			}
+			return data
+		}
+	}
 
 	// Skip because this relation has already been queried
 	if done, ok := c.completed[entry.String()]; ok && done {
