@@ -1,6 +1,7 @@
 package data
 
 import (
+	"database/sql"
 	"fmt"
 	"strings"
 
@@ -171,21 +172,29 @@ func (c *CopyQL) getIDColumns(table string) ([]Column, error) {
 }
 
 func (c *CopyQL) getColumns(table string) ([]Column, error) {
-	rows, err := c.DB.Query(fmt.Sprintf("SHOW COLUMNS FROM %s", table))
+	rows, err := c.DB.Queryx(fmt.Sprintf("SHOW COLUMNS FROM %s", table))
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
+	type columnInfo struct {
+		Field   string         `db:"Field"`
+		Type    string         `db:"Type"`
+		Null    string         `db:"Null"`
+		Key     string         `db:"Key"`
+		Default sql.NullString `db:"Default"`
+		Extra   string         `db:"Extra"`
+	}
+
 	columns := []Column{}
 	for rows.Next() {
-		var colName string
-		var colNullable string
-		rows.Scan(&colName, nil, &colNullable, nil, nil, nil)
+		var cols columnInfo
+		rows.StructScan(&cols)
 		columns = append(columns, Column{
 			Table:    table,
-			Name:     colName,
-			Nullable: colNullable == "YES",
+			Name:     cols.Field,
+			Nullable: cols.Null == "YES",
 		})
 	}
 

@@ -18,7 +18,6 @@ type CopyQL struct {
 	DB         *sqlx.DB
 	SkipTables []string
 	Verbose    bool
-	// relations Relations
 }
 
 type copyData struct {
@@ -51,12 +50,15 @@ func (c *CopyQL) GetData(entry ColumnValue, columns Columns, relations Relations
 }
 
 // PutData loads data from JSON into a sql
-func (c *CopyQL) PutData(data TableData) []error {
+func (c *CopyQL) PutData(data TableData, columns Columns) []error {
 	errs := []error{}
-
+	copy := &copyData{
+		CopyQL:  c,
+		columns: columns,
+	}
 	for table, rows := range data {
 		fmt.Printf("Inserting %s\n", table)
-		err := c.putTableData(table, rows)
+		err := copy.putTableData(table, rows)
 		if err != nil {
 			errs = append(errs, err)
 		}
@@ -196,7 +198,7 @@ func columnMap(columns []Column) map[string]Column {
 	return out
 }
 
-func (c *CopyQL) putTableData(table string, rows []tableRow) error {
+func (c *copyData) putTableData(table string, rows []tableRow) error {
 
 	temp := "INSERT INTO %s (`%s`) VALUES (%s)"
 
@@ -204,14 +206,29 @@ func (c *CopyQL) putTableData(table string, rows []tableRow) error {
 	if err != nil {
 		return err
 	}
+
+	columns, ok := c.columns[table]
+	if !ok {
+		return fmt.Errorf("No table information found for %s", table)
+	}
+	colData := columnMap(columns)
+
 	for _, row := range rows {
 		cols := []string{}
 		binds := []string{}
 		vals := []interface{}{}
 		for c, v := range row {
-			cols = append(cols, c)
-			binds = append(binds, "?")
-			vals = append(vals, v)
+			if cInfo, ok := colData[c]; ok {
+				cols = append(cols, c)
+				binds = append(binds, "?")
+				if v == nil && !cInfo.Nullable {
+					v = ""
+				}
+				if v == "" && cInfo.Nullable {
+					v = nil
+				}
+				vals = append(vals, v)
+			}
 		}
 		stmt := fmt.Sprintf(temp, table, strings.Join(cols, "`,`"), strings.Join(binds, ","))
 		_, err = tx.Exec(stmt, vals...)
@@ -229,19 +246,24 @@ func (c *CopyQL) putTableData(table string, rows []tableRow) error {
 func convertStrings(in map[string]interface{}, columns map[string]Column) {
 	for k, v := range in {
 		t := reflect.TypeOf(v)
+		var col Column
+		var ok bool
+		if col, ok = columns[k]; !ok {
+			col = Column{Name: k}
+		}
 		if t != nil {
 			switch t.Kind() {
 			case reflect.Slice:
 				in[k] = fmt.Sprintf("%s", v)
-
+				if len(in[k].(string)) == 0 && col.Nullable {
+					in[k] = nil
+				}
 			default:
 				// do nothing
 			}
 		} else {
-			if col, ok := columns[k]; ok {
-				if !col.Nullable {
-					in[k] = ""
-				}
+			if !col.Nullable {
+				in[k] = ""
 			}
 		}
 	}

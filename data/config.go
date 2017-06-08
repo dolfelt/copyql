@@ -37,6 +37,7 @@ func LoadConfig(configFile string) (*Configuration, error) {
 		viper.AddConfigPath(".")
 	}
 
+	viper.SetEnvPrefix("copyql")
 	viper.AutomaticEnv()
 
 	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))

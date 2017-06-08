@@ -81,7 +81,7 @@ func rootRun(cmd *cobra.Command, args []string) {
 
 		columns, relations, err := copy.AnalyzeDatabase()
 		if err != nil {
-			color.Red("Error generating automatic relations. %s", err)
+			color.Red("Error generating automatic relations in the source. %s", err)
 			os.Exit(1)
 		}
 
@@ -134,7 +134,13 @@ func rootRun(cmd *cobra.Command, args []string) {
 		Verbose: config.Verbose,
 	}
 
-	errs := place.PutData(pkg)
+	columns, _, err := place.AnalyzeDatabase()
+	if err != nil {
+		color.Red("Error generating automatic relations in the destination. %s", err)
+		os.Exit(1)
+	}
+
+	errs := place.PutData(pkg, *columns)
 
 	if len(errs) > 0 {
 		fmt.Println(errs)
