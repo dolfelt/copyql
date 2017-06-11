@@ -81,6 +81,10 @@ func (c *copyData) plan(entry Column) map[string]string {
 			if rel.ForeignKey != "id" {
 				continue
 			}
+			// Prevent cyclic plan
+			if rel.Table == entry.Table {
+				continue
+			}
 			subPlan := c.plan(rel.Column)
 			for t, c := range subPlan {
 				if _, ok := plan[t]; ok {
