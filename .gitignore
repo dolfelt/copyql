@@ -1,5 +1,5 @@
 copyql.yaml
 vendor/
 output.json
-glide.lock
+Gopkg.lock
 copyql-*

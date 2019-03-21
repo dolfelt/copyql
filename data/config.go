@@ -20,7 +20,7 @@ type Configuration struct {
 	Source      SQLConnection
 	Destination SQLConnection
 	Relations   map[string]string
-	SkipTables  []string
+	SkipTables  []string `mapstructure:"skip"`
 	FileIn      string
 	FileOut     string
 	Verbose     bool
@@ -60,4 +60,5 @@ func setConfigDefaults() {
 		viper.SetDefault(db+".Host", "localhost")
 		viper.SetDefault(db+".User", "root")
 	}
+	viper.SetDefault("SkipTables", []string{})
 }

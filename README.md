@@ -15,6 +15,7 @@ In order to use CopyQL, you must have a YAML configuration in your working direc
   * `password` - the password for the user
   * `database` - the database to use when connecting (required)
 * `relations` - defines custom relationships. This is a list of key-value pairs that map columns. For example, `books.old_library_id: libraries.id`
+* `skip` - an array of tables to skip when searching for data
 
 ### Command
 
@@ -29,10 +30,11 @@ copyql [options] <table>.<column>:<value>
 * `--out` - a JSON file to dump the contents. If this option is specified, no data will be copied to the destination SQL data store.
 * `--in` - a JSON file to read the contents from. If this option is specified, data will not be gathered from the source database.
 * `--config, -c` - the location of a custom configuration file. Defaults to `copyql.yaml` in the working directory.
+* `--skip` - a list of tables to skip
 
 ## Purpose
 
-It is often useful to have real (scrubbed) data when developing, adding features, and performance testing. Having this data locally can greatly speed up development time. However, in bigger systems, the data store is generally too large to copy the entire store locally. 
+It is often useful to have real (scrubbed) data when developing, adding features, and performance testing. Having this data locally can greatly speed up development time. However, in bigger systems, the data store is generally too large to copy the entire store locally.
 
 That's where **CopyQL** comes in.
 

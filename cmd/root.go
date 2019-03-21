@@ -44,11 +44,17 @@ var RootCmd = &cobra.Command{
 
 func rootRun(cmd *cobra.Command, args []string) {
 	config, err := data.LoadConfig(configFile)
-	config.SkipTables, _ = cmd.PersistentFlags().GetStringSlice("skip")
 	if err != nil {
 		color.Red(err.Error())
 		os.Exit(1)
 	}
+
+	skip, err := cmd.PersistentFlags().GetStringSlice("skip")
+	if err != nil {
+		color.Red(err.Error())
+		os.Exit(1)
+	}
+	config.SkipTables = append(config.SkipTables, skip...)
 
 	var pkg data.TableData
 
